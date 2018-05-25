@@ -1,0 +1,11 @@
+
+Options FollowSymLinks
+
+
+RewriteEngine On
+RewriteCond %{REQUEST_URI} \.md$
+RewriteCond %{HTTP_ACCEPT} text/html
+RewriteCond %{HTTP_ACCEPT} !text/markdown
+RewriteRule "(.*)" "html-handler.php?path=$1" [QSA,T=text/html]
+
+AddType text/markdown .md
