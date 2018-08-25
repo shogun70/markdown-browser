@@ -41,9 +41,11 @@ function handler({ url, event, params }) {
                 {
                     requestWillFetch: ({request}) => {
                         // Return `request` or a different Request
+                        //console.log('requestWillFetch', request);
                         let headers = new Headers(request.headers);
                         headers.set('Accept', 'text/markdown');
                         request = new Request(request.url, {
+                            cache: 'reload',
                             headers
                         });
                         return request;
