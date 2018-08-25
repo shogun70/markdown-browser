@@ -1,6 +1,8 @@
 # Documentation
 
-Haha. There is none *(yet)*.
+There is none *(yet)*.
+
+[Project](../index.md)
 
 TODO:
 
