@@ -3,19 +3,22 @@ Options FollowSymLinks
 
 AddType text/markdown .md
 
-RewriteEngine On
-RewriteCond "%{SCRIPT_FILENAME}/../manifest.json" -F
-RewriteRule "(.*)" - [E=MANIFEST:./manifest.json]
-RewriteCond "%{SCRIPT_FILENAME}/../../manifest.json" -F
-RewriteRule "(.*)" - [E=MANIFEST:../manifest.json]
-RewriteCond "%{SCRIPT_FILENAME}/../../../manifest.json" -F
-RewriteRule "(.*)" - [E=MANIFEST:../../manifest.json]
+SetEnvIfExpr true MANIFEST_FNAME=manifest.json
+
+# FIXME this doesn't detect traversal beyond DOCUMENT_ROOT
+SetEnvIfExpr "-F '%{SCRIPT_FILENAME}/../%{reqenv:MANIFEST_FNAME}'" MANIFEST_RPATH=./
+SetEnvIfExpr "-F '%{SCRIPT_FILENAME}/../../%{reqenv:MANIFEST_FNAME}'" MANIFEST_RPATH=../
+SetEnvIfExpr "-F '%{SCRIPT_FILENAME}/../../../%{reqenv:MANIFEST_FNAME}'" MANIFEST_RPATH=../../
+SetEnvIfExpr "-F '%{SCRIPT_FILENAME}/../../../../%{reqenv:MANIFEST_FNAME}'" MANIFEST_RPATH=../../../
+SetEnvIfExpr "-F '%{SCRIPT_FILENAME}/../../../../../%{reqenv:MANIFEST_FNAME}'" MANIFEST_RPATH=../../../../
+SetEnvIfExpr "-F '%{SCRIPT_FILENAME}/../../../../../../%{reqenv:MANIFEST_FNAME}'" MANIFEST_RPATH=../../../../../
 
 <Files ~ "\.(md|html?)$">
-Header set Link: "expr=<%{reqenv:MANIFEST}>; rel=manifest" env=MANIFEST
+Header set Link: "expr=<%{reqenv:MANIFEST_RPATH}%{reqenv:MANIFEST_FNAME}>; rel=manifest" env=MANIFEST_RPATH
 </Files>
 
 
+RewriteEngine On
 RewriteCond %{REQUEST_URI} \.md$
 RewriteCond %{HTTP_ACCEPT} text/html
 RewriteCond %{HTTP_ACCEPT} !text/markdown
