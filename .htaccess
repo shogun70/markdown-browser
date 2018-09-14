@@ -1,11 +1,23 @@
 
 Options FollowSymLinks
 
+AddType text/markdown .md
 
 RewriteEngine On
+RewriteCond "%{SCRIPT_FILENAME}/../manifest.json" -F
+RewriteRule "(.*)" - [E=MANIFEST:./manifest.json]
+RewriteCond "%{SCRIPT_FILENAME}/../../manifest.json" -F
+RewriteRule "(.*)" - [E=MANIFEST:../manifest.json]
+RewriteCond "%{SCRIPT_FILENAME}/../../../manifest.json" -F
+RewriteRule "(.*)" - [E=MANIFEST:../../manifest.json]
+
+<Files ~ "\.(md|html?)$">
+Header set Link: "expr=<%{reqenv:MANIFEST}>; rel=manifest" env=MANIFEST
+</Files>
+
+
 RewriteCond %{REQUEST_URI} \.md$
 RewriteCond %{HTTP_ACCEPT} text/html
 RewriteCond %{HTTP_ACCEPT} !text/markdown
 RewriteRule "(.*)" "html-handler.php?path=$1" [QSA,T=text/html]
 
-AddType text/markdown .md

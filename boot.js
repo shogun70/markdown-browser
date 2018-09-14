@@ -2,7 +2,7 @@
 if ('serviceWorker' in navigator) {
     // Use the window load event to keep the page load performant
     let workerScriptURL = new URL('./sw.js', document.currentScript.src).href;
-    navigator.serviceWorker.register(workerScriptURL, { randow: 123 })
+    navigator.serviceWorker.register(workerScriptURL)
         .then((registration) => {
             let serviceWorker = registration.installing || registration.waiting || registration.active;
             if (serviceWorker) {
