@@ -24,6 +24,35 @@ function transcode(markdown) {
     return result;
 }
 
+function htmlify(text, headers) {
+    let html = transcode(text);
+    let links = headers.get('Link').split(/\s*,\s*/)
+        .map((text) => {
+            let m = text.match(/^\s*<\s*([^>]*)>\s*;\s*rel=(\w*)\s*$/i);
+            return [m[2], m[1]];
+        });
+    let linksHtml = links.map((item) => {
+        let href = item[1], rel = item[0];
+        return `<link rel="${rel}" href="${href}" />`;
+    }).join('\n');
+    let bootScript = links.find(([rel, href]) => /^boot$/i.test(rel))[1];
+    return `
+<!DOCTYPE html>
+<html>
+<head>
+${linksHtml}
+<script src="${bootScript}"></script>
+</head>
+<body>
+<main>
+${html}
+</main>
+</body>
+</html>
+    `;
+
+}
+
 function handler({ url, event, params }) {
     return new Promise((resolve, reject) => {
 
@@ -53,8 +82,8 @@ function handler({ url, event, params }) {
                     cacheWillUpdate: ({request, response}) => {
                         //console.log('cacheWillUpdate', response);
                         return response.text().then((text) => {
-                            let html = transcode(text);
-                            let headers = new Headers(request.headers);
+                            let html = htmlify(text, response.headers);
+                            let headers = new Headers(response.headers);
                             headers.set('Content-Type', 'text/html');
                             headers.set('Content-Length', html.length);
                             let cacheableResponse = new Response(html, {
@@ -77,7 +106,7 @@ function handler({ url, event, params }) {
         });
 
         handler.handle({ event }).then((response) => {
-                //console.log('handle() completed', response);
+                // console.log('handle() completed', response);
         });
 
     });
