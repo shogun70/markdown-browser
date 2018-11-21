@@ -2,22 +2,7 @@
 if ('serviceWorker' in navigator) (function() {
     let serviceWorkerURL = './sw.js';
 
-    if (navigator.serviceWorker.controller) {
-        let manifestLink = document.querySelector('link[rel~="manifest" i]');
-        if (!manifestLink) return;
-        let manifestUrl = manifestLink.href;
-        fetch(manifestUrl)
-            .then((response) => response.json())
-            .then((manifestJson) => {
-                if (!manifestJson) return;
-                let shellUrl = manifestJson.shell_url;
-                if (!shellUrl) return;
-                shellUrl = new URL(shellUrl, manifestUrl).href;
-                // TODO sanity check shellUrl
-                location.replace(shellUrl);
-            });
-    }
-    else {
+    if (!navigator.serviceWorker.controller) {
         let absServiceWorkerURL = new URL(serviceWorkerURL, document.currentScript.src).href;
         navigator.serviceWorker.register(absServiceWorkerURL)
             .then((registration) => {

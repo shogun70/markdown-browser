@@ -53,14 +53,42 @@ ${html}
 
 }
 
-function handler({ url, event, params }) {
-    return new Promise((resolve, reject) => {
+function getShellUrl(url, response) {
+    let headers = response.headers;
+    let links = headers.get('Link').split(/\s*,\s*/)
+        .map((text) => {
+            let m = text.match(/^\s*<\s*([^>]*)>\s*;\s*rel=(\w*)\s*$/i);
+            return [m[2], m[1]];
+        });
+    let linksHtml = links.map((item) => {
+        let href = item[1], rel = item[0];
+        return `<link rel="${rel}" href="${href}" />`;
+    }).join('\n');
+    let manifestUrl = links.find(([rel, href]) => /^manifest$/i.test(rel))[1];
+    manifestUrl = new URL(manifestUrl, url).href;
+    return fetch(manifestUrl)
+        .then((response) => response.json())
+        .then((manifestJson) => {
+            if (!manifestJson) return;
+            let shellUrl = manifestJson.shell_url;
+            if (!shellUrl) return;
+            return new URL(shellUrl, manifestUrl).href;
+        });
+}
 
+function fetchShell(url, response) {
+    return getShellUrl(url, response)
+        .then((shellUrl) => !!shellUrl ? fetch(shellUrl) : response);
+}
+function handler({ url, event, params }) {
+    let isNavigating = event.request.mode == 'navigate';
+    let isReloading = isNavigating && event.request.referrer === event.request.url;
+
+    return new Promise((resolve, reject) => {
 
         let strategy = workbox.strategies.cacheFirst;
 
-        if (event.request.mode === 'navigate' &&
-            event.request.referrer === event.request.url) {
+        if (isReloading) {
             strategy = workbox.strategies.networkFirst;
         }
 
@@ -89,7 +117,8 @@ function handler({ url, event, params }) {
                             let cacheableResponse = new Response(html, {
                                 headers
                             });
-                            resolve(cacheableResponse.clone());
+                            if (!isNavigating) resolve(cacheableResponse.clone());
+                            else resolve(fetchShell(url, response))
                             return cacheableResponse;
                         });
                     },
@@ -98,7 +127,10 @@ function handler({ url, event, params }) {
                     },
                     cachedResponseWillBeUsed({cacheName, request, matchOptions, cachedResponse}) {
                         //console.log('cachedResponseWillBeUsed', cachedResponse);
-                        if (cachedResponse) resolve(cachedResponse);
+                        if (cachedResponse) {
+                            if (!isNavigating) resolve(cachedResponse);
+                            else resolve(fetchShell(url, cachedResponse));
+                        }
                         return cachedResponse;
                     }
                 }
@@ -112,9 +144,6 @@ function handler({ url, event, params }) {
     });
 
 }
-
-let cacheOnlyStrategy = workbox.strategies.cacheOnly();
-
 
 workbox.routing.registerRoute(
     new RegExp('.*\.md'),

@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Title</title>
+</head>
+<body>
+
+<main></main>
+
+</body>
+<script>
+function fetchHtml(url) {
+    return fetch(url)
+        .then((response) => response.text())
+        .then((htmlText) => new DOMParser().parseFromString(htmlText, 'text/html'))
+}
+location.assign2 = function(url) {
+    // FIXME detect off-site links
+    fetchHtml(url)
+        .then((doc) => document.querySelector('main').replaceWith(doc.querySelector('main')))
+        .then(() => history.pushState({}, 'FIXME: rewrite title', url));
+}
+location.replace2 = function(url) {
+    // FIXME detect off-site links
+    fetchHtml(url)
+        .then((doc) => document.querySelector('main').replaceWith(doc.querySelector('main')))
+        .then(() => history.replaceState({}, 'FIXME: rewrite title', url));
+}
+window.addEventListener('popstate', (event) => {
+    fetchHtml(document.URL)
+        .then((doc) => document.querySelector('main').replaceWith(doc.querySelector('main')));
+});
+
+// FIXME handle form-submission
+document.body.addEventListener('click', (event) => {
+    let anchor;
+    for (let el=event.target; el!==event.currentTarget; el=el.parentNode) {
+        if (!el.matches('a[href]')) continue;
+        anchor = el;
+        break;
+    }
+    if (!anchor) return;
+    event.preventDefault();
+    location.assign2(anchor.href);
+});
+location.replace2(document.URL);
+</script>
+</html>
