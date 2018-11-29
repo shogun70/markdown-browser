@@ -76,9 +76,18 @@ function getShellUrl(url, response) {
         });
 }
 
-function fetchShell(url, response) {
+function shellOrPassThru(url, response) {
     return getShellUrl(url, response)
-        .then((shellUrl) => !!shellUrl ? fetch(shellUrl) : response);
+        .then((shellUrl) => {
+            if (shellUrl) console.info("Fetching shell:", shellUrl);
+            if (!shellUrl) return response;
+
+            return fetch(shellUrl)
+                .then((shellResponse) => {
+                    if (!shellResponse.ok) console.warn("Could not load shell:", shellUrl);
+                    return shellResponse.ok ? shellResponse : response;
+                });
+        });
 }
 function handler({ url, event, params }) {
     let isNavigating = event.request.mode == 'navigate';
@@ -117,8 +126,9 @@ function handler({ url, event, params }) {
                             let cacheableResponse = new Response(html, {
                                 headers
                             });
-                            if (!isNavigating) resolve(cacheableResponse.clone());
-                            else resolve(fetchShell(url, response))
+                            let actualResponse = cacheableResponse.clone();
+                            if (!isNavigating) resolve(actualResponse);
+                            else resolve(shellOrPassThru(url, actualResponse))
                             return cacheableResponse;
                         });
                     },
@@ -129,7 +139,7 @@ function handler({ url, event, params }) {
                         //console.log('cachedResponseWillBeUsed', cachedResponse);
                         if (cachedResponse) {
                             if (!isNavigating) resolve(cachedResponse);
-                            else resolve(fetchShell(url, cachedResponse));
+                            else resolve(shellOrPassThru(url, cachedResponse));
                         }
                         return cachedResponse;
                     }

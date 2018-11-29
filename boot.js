@@ -13,7 +13,6 @@ if ('serviceWorker' in navigator) (function() {
                     else serviceWorker.addEventListener('statechange', (e) => {
                         //console.log(e.target.state);
                         if (e.target.state === 'activated') location.reload();
-                        // TODO instead of reloading the current-page this should redirect to shellUrl (if declared)
                     });
                 }
             });
