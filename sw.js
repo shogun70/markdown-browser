@@ -1,11 +1,9 @@
 
 importScripts(
-    'https://storage.googleapis.com/workbox-cdn/releases/3.1.0/workbox-sw.js',
-    'https://rawgit.com/commonmark/commonmark.js/master/dist/commonmark.js'
+    'https://unpkg.com/commonmark@0.28.1/dist/commonmark.js'
     );
 
 if (!commonmark) throw 'Markdown parser failed to install.';
-if (!workbox) throw 'ServiceWorker failed to install.';
 
 self.addEventListener('install', function(event) {
     // The promise that skipWaiting() returns can be safely ignored.
@@ -15,6 +13,8 @@ self.addEventListener('install', function(event) {
     // service worker to install, potentially inside
     // of event.waitUntil();
 });
+
+const MARKDOWN_MATCHER = /\.md$/i;
 
 function transcode(markdown) {
     let reader = new commonmark.Parser();
@@ -89,73 +89,86 @@ function shellOrPassThru(url, response) {
                 });
         });
 }
+
+var CACHE = 'markdown-cache';
+
 function handler({ url, event, params }) {
+    let request = event.request;
     let isNavigating = event.request.mode == 'navigate';
     let isReloading = isNavigating && event.request.referrer === event.request.url;
 
-    return new Promise((resolve, reject) => {
-
-        let strategy = workbox.strategies.cacheFirst;
-
-        if (isReloading) {
-            strategy = workbox.strategies.networkFirst;
+    // This used to use Workbox with the CacheFirst strategy (or NetworkFirst when *reloading*)
+    // and **something like** the following as a plugin for the strategy.
+    let plugin = {
+        requestWillFetch: ({request}) => {
+            // Return `request` or a different Request
+            //console.log('requestWillFetch', request);
+            let headers = new Headers(request.headers);
+            headers.set('Accept', 'text/markdown');
+            request = new Request(request.url, {
+                cache: 'reload',
+                headers
+            });
+            return request;
+        },
+        cacheWillUpdate: ({request, response}) => {
+            //console.log('cacheWillUpdate', response);
+            return response.text().then((text) => {
+                let html = htmlify(text, response.headers);
+                let headers = new Headers(response.headers);
+                headers.set('Content-Type', 'text/html');
+                headers.set('Content-Length', html.length);
+                let cacheableResponse = new Response(html, {
+                    headers
+                });
+                return cacheableResponse;
+            });
+        },
+        cacheDidUpdate: ({cacheName, request, oldResponse, newResponse}) => {
+            //console.log('cacheDidUpdate', newResponse);
+        },
+        cachedResponseWillBeUsed({cacheName, request, matchOptions, cachedResponse}) {
+            //console.log('cachedResponseWillBeUsed', cachedResponse);
+            return !isNavigating ?
+                cachedResponse :
+                shellOrPassThru(url, cachedResponse);
         }
+    };
 
+    let cache;
 
-        let handler = strategy({
-            plugins: [
-                {
-                    requestWillFetch: ({request}) => {
-                        // Return `request` or a different Request
-                        //console.log('requestWillFetch', request);
-                        let headers = new Headers(request.headers);
-                        headers.set('Accept', 'text/markdown');
-                        request = new Request(request.url, {
-                            cache: 'reload',
-                            headers
-                        });
-                        return request;
-                    },
-                    cacheWillUpdate: ({request, response}) => {
-                        //console.log('cacheWillUpdate', response);
-                        return response.text().then((text) => {
-                            let html = htmlify(text, response.headers);
-                            let headers = new Headers(response.headers);
-                            headers.set('Content-Type', 'text/html');
-                            headers.set('Content-Length', html.length);
-                            let cacheableResponse = new Response(html, {
-                                headers
-                            });
-                            let actualResponse = cacheableResponse.clone();
-                            if (!isNavigating) resolve(actualResponse);
-                            else resolve(shellOrPassThru(url, actualResponse))
-                            return cacheableResponse;
-                        });
-                    },
-                    cacheDidUpdate: ({cacheName, request, oldResponse, newResponse}) => {
-                        //console.log('cacheDidUpdate', newResponse);
-                    },
-                    cachedResponseWillBeUsed({cacheName, request, matchOptions, cachedResponse}) {
-                        //console.log('cachedResponseWillBeUsed', cachedResponse);
-                        if (cachedResponse) {
-                            if (!isNavigating) resolve(cachedResponse);
-                            else resolve(shellOrPassThru(url, cachedResponse));
-                        }
-                        return cachedResponse;
-                    }
-                }
-            ]
-        });
-
-        handler.handle({ event }).then((response) => {
-                // console.log('handle() completed', response);
-        });
-
-    });
+    // We (effectively) use a cache-first strategy unless the user is reloading the page (Meta-R)
+    // in which case we use network-first.
+    // Network requests allow modifying the request ...
+    // and also the network response before it is added to the cache.
+    // In all cases the cached-response can be modified before it is used to fulfil the browser-context request.
+    return caches.open(CACHE)
+        .then((openedCache) => { // query the cache
+            cache = openedCache;
+            return cache.match(request);
+        })
+        .then((cachedResponse) => {
+            return !isReloading && cachedResponse ?
+                cachedResponse :
+                fetch(plugin.requestWillFetch({request}))
+                    .then((fetchedResponse) => {
+                        return plugin.cacheWillUpdate({request, response: fetchedResponse});
+                    })
+                    .then((cacheableResponse) => {
+                        cache.put(request, cacheableResponse.clone());
+                        return cacheableResponse;
+                    });
+        })
+        .then((cachedResponse) => {
+            return plugin.cachedResponseWillBeUsed({cacheName: CACHE, request, matchOptions: null, cachedResponse});
+        })
 
 }
 
-workbox.routing.registerRoute(
-    new RegExp('.*\.md'),
-    handler
-);
+self.addEventListener('fetch', function(event) {
+    if (MARKDOWN_MATCHER.test(event.request.url)) {
+        event.respondWith(
+            handler({ url: event.request.url, event, params: null})
+        );
+    }
+});
