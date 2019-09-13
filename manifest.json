@@ -1,3 +1,19 @@
 {
-  "shell_url": "./shell.html"
+  "links": [
+    {
+      "href": "./shell.html",
+      "rel": "shell_url",
+      "type": "text/html"
+    },
+    {
+      "href": "../HyperFrameset/HyperFrameset.js",
+      "rel": "script",
+      "type": "text/javascript"
+    },
+    {
+      "href": "./config.js",
+      "rel": "script",
+      "type": "text/javascript"
+    }
+  ]
 }
