@@ -37,10 +37,11 @@ self.addEventListener('fetch', function(event) {
  * Handler for markdown resource requests.
  * This implementation is quite similar to workbox - https://github.com/GoogleChrome/workbox
  *
+ * @async
  * @param url
  * @param event
  * @param params
- * @returns {Promise<Response | undefined>|*}
+ * @returns {Response}
  */
 function handler({ url, event, params }) {
     let request = event.request;
@@ -126,7 +127,7 @@ function handler({ url, event, params }) {
 function htmlifyWithHeaders(text, headers, url) {
     let links = extractLinksFromHeaders(headers);
     return resolveLinkedLinks(links, url)
-        .then((linkedLinks) => htmlifyWithLinks(text, links.concat(linkedLinks)));
+        .then((linkedLinks) => htmlifyWithLinks(text, links.concat(linkedLinks), url));
 }
 
 /**
@@ -136,9 +137,9 @@ function htmlifyWithHeaders(text, headers, url) {
  * @param links
  * @returns {string}
  */
-function htmlifyWithLinks(text, links) {
+function htmlifyWithLinks(text, links, url) {
     let html = transcode(text);
-    let title = "FIXME: <title> not implemented";
+    let title = inferTitle(html, links, url);
     let linksHtml = links.map((link) => {
         if (['text/javascript', 'application/javascript', 'module'].includes(link.type)) {
             return `<script src="${link.href}" type="${link.type}"></script>`;
@@ -178,6 +179,22 @@ function transcode(markdown) {
     let parsed = reader.parse(markdown); // parsed is a 'Node' tree
     let result = writer.render(parsed); // result is a String
     return result;
+}
+
+/**
+ * Currently infers the document title as the text of the first heading element.
+ *
+ * @param html {string}
+ * @param links {Array}
+ * @param url {string}
+ * @returns {string}
+ */
+function inferTitle(html, links, url) {
+    let headerMatch = html.match(/<h[1-6](?:[^>]*)>(.*)<\/h[1-6]\b/);
+    if (!headerMatch) return new URL(url).pathname;
+    let innerHTML = headerMatch[1];
+    let text = innerHTML.replace(/<\/?[^>]*>/g, '');
+    return text;
 }
 
 /**
