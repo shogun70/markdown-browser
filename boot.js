@@ -1,10 +1,15 @@
 // Check that service workers are registered
 if ('serviceWorker' in navigator) (function() {
-    let serviceWorkerURL = './sw.js';
+    const SERVICEWORKER_FNAME = 'serviceworker.js';
+    function getServiceWorkerUrl() {
+        // TODO: Maybe this should lookup serviceworker in the manifest.json
+        let swLink = document.querySelector('link[rel~="serviceworker"i]');
+        return swLink ? swLink.href : new URL(SERVICEWORKER_FNAME, document.currentScript.src).href;
+    }
 
     if (!navigator.serviceWorker.controller) {
-        let absServiceWorkerURL = new URL(serviceWorkerURL, document.currentScript.src).href;
-        navigator.serviceWorker.register(absServiceWorkerURL)
+        let serviceWorkerUrl = getServiceWorkerUrl();
+        navigator.serviceWorker.register(serviceWorkerUrl)
             .then((registration) => {
                 let serviceWorker = registration.installing || registration.waiting || registration.active;
                 if (serviceWorker) {

@@ -1,9 +1,11 @@
 
 Options FollowSymLinks
 
+ExpiresActive On
+ExpiresDefault "access plus 10 second"
+
 AddType text/markdown .md
 
 RewriteEngine On
 RewriteCond %{REQUEST_URI} \.md$
-RewriteRule "(.*)" "html-handler.php?path=$1" [QSA,T=text/html]
-
+RewriteRule ".*" "index.php" [QSA,T=text/html]
