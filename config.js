@@ -8,8 +8,6 @@
     var baseURL = URL(framesetURL);
     var scope = baseURL.base;
 
-    console.log(framesetURL, scope);
-
     Meeko.framer.config({
         /*
         The framesetURL can be dependent on anything, for-instance

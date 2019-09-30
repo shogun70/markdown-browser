@@ -2,10 +2,16 @@
 Options FollowSymLinks
 
 ExpiresActive On
+# Adjust the cache settings as appropriate. 10 seconds is a development setting.
 ExpiresDefault "access plus 10 second"
+ExpiresByType application/json "access plus 10 second"
+ExpiresByType application/javascript "access plus 10 second"
 
 AddType text/markdown .md
 
 RewriteEngine On
 RewriteCond %{REQUEST_URI} \.md$
 RewriteRule ".*" "index.php" [QSA,T=text/html]
+
+# TODO: make CLear-Site-Data available for dev, see https://w3c.github.io/webappsec-clear-site-data/
+#Header set Clear-Site-Data: '"cache", "cookies", "storage", "executionContexts"'

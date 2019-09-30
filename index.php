@@ -65,6 +65,11 @@
     $RESOURCE_PATH = parse_url($REQUEST_URI)['path'];
 
     /**
+     * Detects if the server will "push" links with rel="preload".
+     */
+    $SUPPORTS_PUSH = $_SERVER['H2PUSH'] == 'on';
+
+    /**
      * Convert the url path to an absolute path in the local fs.
      * @param $url_path the *absolute* url path
      * @return string
@@ -147,18 +152,24 @@
      * - Do browsers accept HTTP Link headers with @as?
      */
     $links = [];
-    if ($type == 'text/html') {
-        array_push($links, (object) ['href' => $bootScript, 'rel' => 'preload script', 'type' => 'text/javascript']);
-        array_push($links, (object) ['href' => $serviceWorker, 'rel' => 'preload worker', 'type' => 'text/javascript']);
+    if ($SUPPORTS_PUSH && $type == 'text/html') {
+        array_push($links, (object) ['href' => $bootScript, 'rel' => 'preload', 'as' => 'script', 'type' => 'text/javascript']);
+        array_push($links, (object) ['href' => $serviceWorker, 'rel' => 'preload', 'as' => 'worker', 'type' => 'text/javascript']);
     }
 
     if ($manifest_path) {
-        $manifest = (object) ['href' => $manifest_path, 'rel' => 'manifest', 'type' => 'application/json'];
+        /*
+         * FIXME: Apparently pushed resources with @as='fetch' need to have @crossorigin='anonymous'
+         *   or fetch() ignore the item from the push-cache due to request headers mismatch.
+         *   Need to verify if @crossorigin can always be 'anonymous'.
+         */
+        $manifest = (object) ['href' => $manifest_path, 'rel' => 'manifest', 'type' => 'application/json', 'crossorigin' => 'anonymous'];
         if (!$ADD_LINKS_FROM_MANIFEST) {
             $manifest->{'rel'} .= ' links';
         }
-        if ($type == 'text/html') {
-            $manifest->{'rel'} .= ' preload fetch';
+        if ($SUPPORTS_PUSH && $type == 'text/html') {
+            $manifest->{'rel'} .= ' preload';
+            $manifest->{'as'} = 'fetch';
         }
         array_push($links, $manifest);
         if ($ADD_LINKS_FROM_MANIFEST) {
@@ -189,9 +200,9 @@
 <!DOCTYPE html>
 <meta charset="UTF-8" />
 <?php if ($manifest_path): ?>
-<link rel="manifest preload" href="<?= $manifest_path ?>" as="fetch" />
+<link rel="manifest <?= $SUPPORTS_PUSH ? 'preload' : ''?>" href="<?= $manifest_path ?>" as="fetch" crossorigin="anonymous"/>
 <?php endif; ?>
-<link href="<?= $serviceWorker ?>" rel="serviceworker preload" as="worker" type="text/javascript" />
+<link href="<?= $serviceWorker ?>" rel="serviceworker <?= $SUPPORTS_PUSH ? 'preload' : ''?>" as="worker" type="text/javascript" />
 <script src="<?= $bootScript ?>" type="text/javascript"></script>
 <plaintext type="text/markdown">
 <?php endif; ?>
