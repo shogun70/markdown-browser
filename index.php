@@ -67,7 +67,7 @@
     /**
      * Detects if the server will "push" links with rel="preload".
      */
-    $SUPPORTS_PUSH = $_SERVER['H2PUSH'] == 'on';
+    $SUPPORTS_PUSH = isset($_SERVER['H2PUSH']) && $_SERVER['H2PUSH'] == 'on';
 
     /**
      * Convert the url path to an absolute path in the local fs.
@@ -93,8 +93,8 @@
         $fspath = resolve_fs_path($urlpath);
 
         if (file_exists($fspath)) return $urlpath;
-        if ($currentDir === "/") return null;
-        $currentDir = dirname($currentDir);
+        if ($currentDir === "") return null;
+        $currentDir = safe_dirname($currentDir);
         return find_ancestor_file($name, $currentDir);
     }
 
@@ -130,14 +130,23 @@
         return  $scheme ? "$scheme://$host$abspath" : $abspath;
     }
 
+    /**
+     * Get the dirname for a file. Never includes a trailing slash even if the result is "/".
+     *
+     * @param $file {string} the file path.
+     */
+    function safe_dirname($file) {
+        return preg_replace('#/$#', '', dirname($file));
+    }
+
     $type = (preg_match('/^text\/html/', $HTTP_ACCEPT) && !preg_match('/^text\/markdown/', $HTTP_ACCEPT)) ?
             'text/html' : 'text/markdown';
 
-    $scriptDir = dirname($SCRIPT_NAME);
+    $scriptDir = safe_dirname($SCRIPT_NAME);
     $bootScript = "$scriptDir/$BOOTSCRIPT_FNAME";
     $serviceWorker = "$scriptDir/$SERVICEWORKER_FNAME";
 
-    $resourceDir = dirname($RESOURCE_PATH);
+    $resourceDir = safe_dirname($RESOURCE_PATH);
     $manifest_path = find_ancestor_file($MANIFEST_FNAME, $resourceDir);
 
     header("Content-Type: $type");
@@ -154,7 +163,7 @@
     $links = [];
     if ($SUPPORTS_PUSH && $type == 'text/html') {
         array_push($links, (object) ['href' => $bootScript, 'rel' => 'preload', 'as' => 'script', 'type' => 'text/javascript']);
-        array_push($links, (object) ['href' => $serviceWorker, 'rel' => 'preload', 'as' => 'worker', 'type' => 'text/javascript']);
+        array_push($links, (object) ['href' => $serviceWorker, 'rel' => 'preload', 'as' => 'serviceworker worker script', 'type' => 'text/javascript']);
     }
 
     if ($manifest_path) {
@@ -169,7 +178,7 @@
         }
         if ($SUPPORTS_PUSH && $type == 'text/html') {
             $manifest->{'rel'} .= ' preload';
-            $manifest->{'as'} = 'fetch';
+            $manifest->{'as'} = 'manifest fetch';
         }
         array_push($links, $manifest);
         if ($ADD_LINKS_FROM_MANIFEST) {
@@ -200,9 +209,9 @@
 <!DOCTYPE html>
 <meta charset="UTF-8" />
 <?php if ($manifest_path): ?>
-<link rel="manifest <?= $SUPPORTS_PUSH ? 'preload' : ''?>" href="<?= $manifest_path ?>" as="fetch" crossorigin="anonymous"/>
+<link rel="manifest <?= $SUPPORTS_PUSH ? 'preload' : ''?>" href="<?= $manifest_path ?>" as="manifest fetch" crossorigin="anonymous"/>
 <?php endif; ?>
-<link href="<?= $serviceWorker ?>" rel="serviceworker <?= $SUPPORTS_PUSH ? 'preload' : ''?>" as="worker" type="text/javascript" />
+<link href="<?= $serviceWorker ?>" rel="serviceworker <?= $SUPPORTS_PUSH ? 'preload' : ''?>" as="serviceworker worker script" type="text/javascript" />
 <script src="<?= $bootScript ?>" type="text/javascript"></script>
 <plaintext type="text/markdown">
 <?php endif; ?>
