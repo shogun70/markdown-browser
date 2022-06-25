@@ -15,23 +15,29 @@ if ('serviceWorker' in navigator) (function() {
                 .map((link) => fetch(link.href)));
     }
 
+    // TODO: Supposedly `serviceWorker.ready` provides the same functionality.
+    function awaitActiveRegistration(registration) {
+        return new Promise((resolve, reject) => {
+            let serviceWorker = registration.installing || registration.waiting || registration.active;
+            if (serviceWorker) {
+                console.debug(serviceWorker.state);
+                if (serviceWorker.state === 'activated') resolve();
+                else serviceWorker.addEventListener('statechange', (e) => {
+                    console.debug(e.target.state);
+                    if (e.target.state === 'activated') resolve();
+                });
+            }
+            else {
+                reject();
+            }
+        });
+    }
+
+    // TODO: error handling, content-hiding.
     if (!navigator.serviceWorker.controller) {
         awaitPreloads()
-            .then(() => {
-                let serviceWorkerUrl = getServiceWorkerUrl();
-                navigator.serviceWorker.register(serviceWorkerUrl)
-                    .then((registration) => {
-                        let serviceWorker = registration.installing || registration.waiting || registration.active;
-                        if (serviceWorker) {
-                            //console.log(serviceWorker.state);
-                            if (serviceWorker.state === 'activated') location.reload();
-                            else serviceWorker.addEventListener('statechange', (e) => {
-                                //console.log(e.target.state);
-                                if (e.target.state === 'activated') location.reload();
-                            });
-                        }
-                    });
-            });
-
+            .then(() => navigator.serviceWorker.register(getServiceWorkerUrl()))
+            .then(awaitActiveRegistration)
+            .then(() => location.reload());
     }
 })();
