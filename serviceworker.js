@@ -11,7 +11,7 @@ const MARKDOWN_MATCHER = /\.md$/i;
 const CACHE = 'markdown-cache';
 
 importScripts(
-    'https://unpkg.com/commonmark@0.29.0/dist/commonmark.js'
+    'https://unpkg.com/commonmark@0.30.0/dist/commonmark.js'
     );
 
 if (!commonmark) throw 'Markdown parser failed to install.';
@@ -53,7 +53,7 @@ function handler({ url, event, params }) {
     let plugin = {
         requestWillFetch: ({request}) => {
             // Return `request` or a different Request
-            //console.log('requestWillFetch', request);
+            console.debug('requestWillFetch', request);
             let headers = new Headers(request.headers);
             headers.set('Accept', 'text/markdown');
             request = new Request(request.url, {
@@ -63,25 +63,47 @@ function handler({ url, event, params }) {
             return request;
         },
         cacheWillUpdate: ({request, response}) => {
-            //console.log('cacheWillUpdate', response);
+            console.debug('cacheWillUpdate', response);
             return response.text()
-                .then((text) => htmlifyWithHeaders(text, response.headers, request.url))
-                .then((html) => {
-                    let headers = new Headers(response.headers);
-                    headers.set('Content-Type', 'text/html');
-                    headers.set('Content-Length', html.length);
-                    let cacheableResponse = new Response(html, {
-                        headers
-                    });
-                    return cacheableResponse;
+                .then((text) => {
+                    let html = transcode(text);
+                    let title = inferTitle(html, url);
+                    let links = extractLinksFromHeaders(response.headers);
+                    return resolveLinkedLinks(links, url)
+                        .then((linkedLinks) => {
+                            let headers = new Headers(response.headers);
+                            headers.set('Title', title);
+                            linkedLinks.forEach((link) => {
+                                headers.append('Link', `<${link.href}>` +
+                                    (link.rel ? `; rel="${link.rel}"` : ``) +
+                                    (link.as ? `; as="${link.as}"` : ``) +
+                                    (link.type ? `; type="${link.type}"` : ``));
+                            });
+                            headers.set('Content-Type', 'text/html');
+                            headers.set('Content-Length', html.length);
+                            let cacheableResponse = new Response(html, {
+                                headers
+                            });
+                            return cacheableResponse;
+                        });
                 });
         },
         cacheDidUpdate: ({cacheName, request, oldResponse, newResponse}) => {
-            //console.log('cacheDidUpdate', newResponse);
+            console.debug('cacheDidUpdate', newResponse);
         },
         cachedResponseWillBeUsed({cacheName, request, matchOptions, cachedResponse}) {
-            //console.log('cachedResponseWillBeUsed', cachedResponse);
-            return cachedResponse;
+            console.debug('cachedResponseWillBeUsed', cachedResponse);
+            return cachedResponse.text()
+                .then((html) => {
+                    let links = extractLinksFromHeaders(cachedResponse.headers);
+                    let title = cachedResponse.headers.get('Title');
+                    html = applyTemplate(html, title, links);
+                    let headers = new Headers(cachedResponse.headers);
+                    headers.set('Content-Length', html.length);
+                    return new Response(html, {
+                        headers
+                    });
+                });
         }
     };
 
@@ -111,43 +133,19 @@ function handler({ url, event, params }) {
         })
         .then((cachedResponse) => {
             return plugin.cachedResponseWillBeUsed({cacheName: CACHE, request, matchOptions: null, cachedResponse});
-        })
-
+        });
 }
 
-/**
- * Generate a document as HTML from a resources body-text, headers and url.
- *
- * @async
- * @param text
- * @param headers
- * @param url
- * @returns {string}
- */
-function htmlifyWithHeaders(text, headers, url) {
-    let links = extractLinksFromHeaders(headers);
-    return resolveLinkedLinks(links, url)
-        .then((linkedLinks) => htmlifyWithLinks(text, links.concat(linkedLinks), url));
-}
-
-/**
- * Generate a document as HTML from a resources body-text and provided links.
- *
- * @param text
- * @param links
- * @returns {string}
- */
-function htmlifyWithLinks(text, links, url) {
-    let html = transcode(text);
-    let title = inferTitle(html, links, url);
+function applyTemplate(html, title, links) {
     let linksHtml = links.map((link) => {
         if (['text/javascript', 'application/javascript', 'module'].includes(link.type)) {
             return `<script src="${link.href}" type="${link.type}"></script>`;
         }
         return `<link` +
-            ( link.href ? ` href="${link.href}"` : `` ) +
-            ( link.rel ? ` rel="${link.rel}"` : `` ) +
-            ( link.type ? ` type="${link.type}"` : `` ) +
+            (link.href ? ` href="${link.href}"` : ``) +
+            (link.rel ? ` rel="${link.rel}"` : ``) +
+            (link.as ? ` as="${link.as}"` : ``) +
+            (link.type ? ` type="${link.type}"` : ``) +
             ` />`;
     }).join('\n');
     // FIXME needs charset
@@ -185,11 +183,10 @@ function transcode(markdown) {
  * Currently infers the document title as the text of the first heading element.
  *
  * @param html {string}
- * @param links {Array}
  * @param url {string}
  * @returns {string}
  */
-function inferTitle(html, links, url) {
+function inferTitle(html, url) {
     let headerMatch = html.match(/<h[1-6](?:[^>]*)>(.*)<\/h[1-6]\b/);
     if (!headerMatch) return new URL(url).pathname;
     let innerHTML = headerMatch[1];
