@@ -6,8 +6,10 @@
      * - FIXME: That the resource exists.
      * - That the resource and this script are in the same DOCUMENT_ROOT (is this essential?)
      * - That the boot-script and serviceworker-script exist.
-     * - That the manifest (if it exists) has a "links" array of url descriptors ("href", "rel", "type").
-     * - For performance you should enabled HTTP2 so boot-script, serviceworker, manifest are preloaded.
+     * - That the manifest (if it exists) has a "shell" field, which is either:
+     *     + a URL string
+     *     + an array of url descriptors ("href", "rel", "type").
+     * - For performance you should enable HTTP2 so boot-script, serviceworker, manifest are preloaded.
      *
      * Tips for HTTP2:
      * - Browsers only support HTTP2 over HTTPS therefore you need a valid certificate.
@@ -184,11 +186,21 @@
         if ($ADD_LINKS_FROM_MANIFEST) {
             $manifest_contents = file_get_contents(resolve_fs_path($manifest_path));
             $manifest_json = json_decode($manifest_contents);
-            $manifest_links = $manifest_json->{'links'};
-            foreach($manifest_links as $link) {
-                $href = $link->{'href'};
-                $link->{'href'} = resolve_url($href, $manifest_path);
+            $manifest_links = $manifest_json->{'shell'};
+            if (is_string($manifest_links)) {
+                $link = [
+                    'href' => resolve_url($manifest_links, $manifest_path),
+                    'rel' => 'shell',
+                    'type' => 'text/html'
+                ];
                 array_push($links, $link);
+            }
+            else {
+                foreach($manifest_links as $link) {
+                    $href = $link->{'href'};
+                    $link->{'href'} = resolve_url($href, $manifest_path);
+                    array_push($links, $link);
+                }
             }
         }
     }

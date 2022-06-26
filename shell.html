@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+    <!-- Hyperlinks must NOT be relative -->
     <meta charset="UTF-8">
     <title>Title</title>
     <style>
@@ -9,22 +10,11 @@
     </style>
 </head>
 <body>
-<script for>
-    ({
-        lookup: function(url) { return 'hf_main'; }
-    })
-</script>
 
 <header>This header is from the shell.</header>
 
 <main>
-    <hf-frame targetname="hf_main" src="scope:./index.md" type="html">
-        <hf-body>
-            <hf-transform type="main">
-                <p class="error">You shouldn't see this main content.</p>
-            </hf-transform>
-        </hf-body>
-    </hf-frame>
+    <p class="error">You shouldn't see this main content.</p>
 </main>
 
 <footer>This footer is from the shell</footer>

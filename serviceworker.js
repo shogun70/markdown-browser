@@ -79,6 +79,10 @@ function handler({ url, event, params }) {
                                     (link.as ? `; as="${link.as}"` : ``) +
                                     (link.type ? `; type="${link.type}"` : ``));
                             });
+                            if (linkedLinks.length == 1 && linkedLinks[0].rel === 'shell') {
+                                let shellUrl = linkedLinks[0].href;
+                                headers.set('Shell', shellUrl)
+                            }
                             headers.set('Content-Type', 'text/html');
                             headers.set('Content-Length', html.length);
                             let cacheableResponse = new Response(html, {
@@ -94,26 +98,28 @@ function handler({ url, event, params }) {
         cachedResponseWillBeUsed({cacheName, request, matchOptions, cachedResponse}) {
             console.debug('cachedResponseWillBeUsed', cachedResponse);
             return cachedResponse.text()
-                .then((html) => {
+                .then((content) => {
                     let links = extractLinksFromHeaders(cachedResponse.headers);
                     let title = cachedResponse.headers.get('Title');
-                    html = applyTemplate(html, title, links);
-                    let headers = new Headers(cachedResponse.headers);
-                    headers.set('Content-Length', html.length);
-                    return new Response(html, {
-                        headers
-                    });
+                    return getTemplate(request.mode === 'navigate' ? cachedResponse.headers.get('Shell') : null)
+                        .then((template) => {
+                            html = applyTemplate(template, content, title, links);
+                            let headers = new Headers(cachedResponse.headers);
+                            headers.set('Content-Length', html.length);
+                            return new Response(html, {
+                                headers
+                            });
+                        });
                 });
         }
     };
-
-    let cache;
 
     // We (effectively) use a cache-first strategy unless the user is reloading the page (Meta-R)
     // in which case we use network-first.
     // Network requests allow modifying the request ...
     // and also the network response before it is added to the cache.
     // In all cases the cached-response can be modified before it is used to fulfil the browser-context request.
+    let cache;
     return caches.open(CACHE)
         .then((openedCache) => { // query the cache
             cache = openedCache;
@@ -136,35 +142,6 @@ function handler({ url, event, params }) {
         });
 }
 
-function applyTemplate(html, title, links) {
-    let linksHtml = links.map((link) => {
-        if (['text/javascript', 'application/javascript', 'module'].includes(link.type)) {
-            return `<script src="${link.href}" type="${link.type}"></script>`;
-        }
-        return `<link` +
-            (link.href ? ` href="${link.href}"` : ``) +
-            (link.rel ? ` rel="${link.rel}"` : ``) +
-            (link.as ? ` as="${link.as}"` : ``) +
-            (link.type ? ` type="${link.type}"` : ``) +
-            ` />`;
-    }).join('\n');
-    // FIXME needs charset
-    return `
-<!DOCTYPE html>
-<html>
-<head>
-<title>${title}</title>
-${linksHtml}
-</head>
-<body>
-<main>
-${html}
-</main>
-</body>
-</html>
-    `;
-}
-
 /**
  * Convert markdown to html.
  *
@@ -183,7 +160,7 @@ function transcode(markdown) {
  * Currently infers the document title as the text of the first heading element.
  *
  * @param html {string}
- * @param url {string}
+ * @param url {string} URL of the content. The pathname is used as a fallback.
  * @returns {string}
  */
 function inferTitle(html, url) {
@@ -227,7 +204,7 @@ function extractLinksFromHeaders(headers) {
 }
 
 /**
- * Currently extracts links from the links array in the manifest file
+ * Currently extracts links from the `shell` array in the manifest file
  * but only if the manifest <link> has a @rel with "manifest" and "links"
  *
  * @async
@@ -246,16 +223,107 @@ function resolveLinkedLinks(links, url) {
 }
 
 /**
- * Extract a list of link descriptors from a manifest
- * @param manifest
- * @param manifestUrl
+ * Extract a list of resolved link descriptors from a manifest.
+ * @param manifest {Object} from the manifest JSON file.
+ * @param manifestUrl {string} the URL of the manifest.
  * @returns {Array<Object>}
  */
 function extractLinksFromManifest(manifest, manifestUrl) {
-    if (!manifest || !manifest.links) return [];
-    let links = manifest.links; // FIXME should use a deep-clone.
+    if (!manifest || !manifest.shell) return [];
+    let links = manifest.shell; // FIXME should use a deep-clone.
+    if (typeof links === 'string') {
+        links = [{
+            href: links,
+            rel: 'shell',
+            type: 'text/html'
+        }];
+    }
     links.forEach((link) => link.href = resolveURL(link.href, manifestUrl));
     return links;
+}
+
+/**
+ * Merge variable content into an HTML template.
+ * TODO: extract charset from network response and pass as an argument here.
+ *
+ * @param template
+ * @param content
+ * @param title
+ * @param links {Array<Object>}
+ * @returns {string}
+ */
+function applyTemplate(template, content, title, links) {
+    let linksHtml = links.map((link) => {
+        if (['text/javascript', 'application/javascript', 'module'].includes(link.type)) {
+            return `<script src="${link.href}" type="${link.type}"></script>`;
+        }
+        return `<link` +
+            (link.href ? ` href="${link.href}"` : ``) +
+            (link.rel ? ` rel="${link.rel}"` : ``) +
+            (link.as ? ` as="${link.as}"` : ``) +
+            (link.type ? ` type="${link.type}"` : ``) +
+            ` />`;
+    }).join('\n');
+
+    return template
+        .replace(/(?<=<title\b[^>]*>).*(?=<\/title>)/ims, title)
+        .replace(/(?=<\/head>)/ims, linksHtml)
+        .replace(/(?<=<main\b[^>]*>).*(?=<\/main>)/ims, content);
+}
+
+/**
+ * Retrieve the HTML template identified by supplied URL, or return the default template.
+ *
+ * @param shellUrl the HTML template URL.
+ * @returns {string}
+ */
+function getTemplate(shellUrl) {
+    if (shellUrl) {
+        return fetchThroughCache(shellUrl)
+            .then((response) => response.ok ? response.text() : getDefaultTemplate())
+            .catch((err) => getDefaultTemplate());
+    }
+    return getDefaultTemplate();
+}
+
+function getDefaultTemplate() {
+    return Promise.resolve(`
+<!DOCTYPE html>
+<html>
+  <head>
+    <title></title>
+  </head>
+  <body>
+    <main></main>
+  </body>
+</html>
+    `);
+}
+
+/**
+ * Request a url.
+ * If it is in the cache then return that,
+ * otherwise fetch from the network and add it to the cache (if fetch succeeds).
+ *
+ * @param url
+ * @returns {Response}
+ */
+function fetchThroughCache(url) {
+    let request = new Request(url);
+    return caches.open(CACHE)
+        .then((cache) => {
+            return caches.match(request)
+                .then((cachedResponse) => {
+                    return cachedResponse ? cachedResponse.clone() : fetch(request)
+                        .then((response) => {
+                            let clonedResponse = response.clone();
+                            if (response.ok) {
+                                cache.put(request, response);
+                            }
+                            return clonedResponse;
+                        });
+                });
+        });
 }
 
 /**
