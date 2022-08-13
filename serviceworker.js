@@ -5,6 +5,11 @@
 const MARKDOWN_MATCHER = /\.md$/i;
 
 /**
+ * Pattern for detecting front-matter.
+ */
+const FRONT_MATTER_MATCHER = /^---/;
+
+/**
  * Name of the cache for htmlified markdown resources.
  * @type {string}
  */
@@ -66,13 +71,13 @@ function handler({ url, event, params }) {
             console.debug('cacheWillUpdate', response);
             return response.text()
                 .then((text) => {
-                    let html = transcode(text);
-                    let title = inferTitle(html, url);
+                    let inferredResponse = extractFrontMatter(text);
+                    let html = transcode(inferredResponse.text);
+                    html = htmlifyWithMetadata(html, inferredResponse.metadata, url);
                     let links = extractLinksFromHeaders(response.headers);
                     return resolveLinkedLinks(links, url)
                         .then((linkedLinks) => {
                             let headers = new Headers(response.headers);
-                            headers.set('Title', title);
                             linkedLinks.forEach((link) => {
                                 headers.append('Link', `<${link.href}>` +
                                     (link.rel ? `; rel="${link.rel}"` : ``) +
@@ -100,10 +105,12 @@ function handler({ url, event, params }) {
             return cachedResponse.text()
                 .then((content) => {
                     let links = extractLinksFromHeaders(cachedResponse.headers);
-                    let title = cachedResponse.headers.get('Title');
                     return getTemplate(request.mode === 'navigate' ? cachedResponse.headers.get('Shell') : null)
                         .then((template) => {
-                            html = applyTemplate(template, content, title, links);
+                            html = applyTemplate(template,
+                                        content.match(/(?<=<main\b[^>]*>).*(?=<\/main>)/ims),
+                                        content.match(/(?<=<head\b[^>]*>).*(?=<\/head>)/ims),
+                                        links);
                             let headers = new Headers(cachedResponse.headers);
                             headers.set('Content-Length', html.length);
                             return new Response(html, {
@@ -143,6 +150,72 @@ function handler({ url, event, params }) {
 }
 
 /**
+ * Extract front-matter from Markdown text and return an object containing
+ *   - the metadata as key-value
+ *   - the remaining text
+ *
+ * @param text
+ * @returns {{metadata: {}, text}}
+ */
+function extractFrontMatter(text)
+{
+    let metadata = {};
+    let lineReader = new LineReader(text);
+    let line = lineReader.readLine();
+    if (FRONT_MATTER_MATCHER.test(line)) {
+        let frontMatter = '';
+        while (!FRONT_MATTER_MATCHER.test(line = lineReader.readLine())) {
+            frontMatter += line;
+            // FIXME trim leading spaces for multiline properties/
+        }
+        let props = frontMatter.split(/\n(?=\w)/m);
+        props.forEach((prop) => {
+            let colon = prop.search(':');
+            let key = prop.substring(0, colon).trim();
+            let value = prop.substring(colon + 1).trim().replace(/\s*s\n\s+/gm, '\n');
+            metadata[key] = value;
+        });
+
+        text = lineReader.remainder();
+    }
+
+    return {
+        metadata,
+        text
+    }
+}
+
+/**
+ * Utility class for extractFrontMatter.
+ */
+class LineReader {
+    NEW_LINE_REGEX = /\r\n|\n|\r/gm;
+    startIndex = 0;
+    text;
+
+    constructor(text) {
+        this.text = text;
+    }
+
+    readLine() {
+        let result = this.NEW_LINE_REGEX.exec(this.text);
+        if (result) {
+            let lastIndex = this.NEW_LINE_REGEX.lastIndex;
+            let line = this.text.substring(this.startIndex, lastIndex);
+            this.startIndex = lastIndex;
+            return line;
+        }
+        else {
+            return null;
+        }
+    }
+
+    remainder() {
+        return this.text.substr(this.startIndex);
+    }
+}
+
+/**
  * Convert markdown to html.
  *
  * @param markdown
@@ -152,8 +225,7 @@ function transcode(markdown) {
     let reader = new commonmark.Parser();
     let writer = new commonmark.HtmlRenderer();
     let parsed = reader.parse(markdown); // parsed is a 'Node' tree
-    let result = writer.render(parsed); // result is a String
-    return result;
+    return writer.render(parsed);
 }
 
 /**
@@ -248,11 +320,11 @@ function extractLinksFromManifest(manifest, manifestUrl) {
  *
  * @param template
  * @param content
- * @param title
+ * @param metadata
  * @param links {Array<Object>}
  * @returns {string}
  */
-function applyTemplate(template, content, title, links) {
+function applyTemplate(template, content, metadata, links) {
     let linksHtml = links.map((link) => {
         if (['text/javascript', 'application/javascript', 'module'].includes(link.type)) {
             return `<script src="${link.href}" type="${link.type}"></script>`;
@@ -266,7 +338,7 @@ function applyTemplate(template, content, title, links) {
     }).join('\n');
 
     return template
-        .replace(/(?<=<title\b[^>]*>).*(?=<\/title>)/ims, title)
+        .replace(/(?<=<head\b[^>]*>)/ims, metadata)
         .replace(/(?=<\/head>)/ims, linksHtml)
         .replace(/(?<=<main\b[^>]*>).*(?=<\/main>)/ims, content);
 }
@@ -301,9 +373,46 @@ function getDefaultTemplate() {
 }
 
 /**
+ * Generate a document as HTML from a resources body-text and metadata.
+ *
+ * @param html
+ * @param metadata
+ * @returns {string}
+ */
+function htmlifyWithMetadata(html, metadata, url) {
+    let title;
+    let metadataList = [];
+    Object.entries(metadata).forEach(([key, value]) => {
+        if ('title' === key.toLowerCase()) title = value;
+        else metadataList.push(`<meta name="${key}" content="${value}" />`);
+    });
+
+    if (!title) title = inferTitle(html, url);
+
+    metadataList.push(`<title>${title}</title>`);
+
+    let metaHtml = metadataList.join('\n');
+
+    return `
+<!DOCTYPE html>
+<html>
+<head>
+${metaHtml}
+</head>
+<body>
+<main>
+${html}
+</main>
+</body>
+</html>
+    `;
+}
+
+/**
  * Request a url.
  * If it is in the cache then return that,
  * otherwise fetch from the network and add it to the cache (if fetch succeeds).
+ * This is used for secondary resources - manifest, shell, etc.
  *
  * @param url
  * @returns {Response}
@@ -312,7 +421,7 @@ function fetchThroughCache(url) {
     let request = new Request(url);
     return caches.open(CACHE)
         .then((cache) => {
-            return caches.match(request)
+            return cache.match(request)
                 .then((cachedResponse) => {
                     return cachedResponse ? cachedResponse.clone() : fetch(request)
                         .then((response) => {
